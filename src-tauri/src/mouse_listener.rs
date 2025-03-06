@@ -1,37 +1,97 @@
 use rdev::{listen, EventType};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use std::thread;
 use std::time::{Duration, Instant};
+use tokio::sync::Mutex;
 
-pub fn run_mouse_listener<F>(emit: F)
+/// Shared state for managing the mouse listener thread.
+#[derive(Clone)]
+pub struct MouseListenerState {
+    pub stop_flag: Arc<AtomicBool>, // Flag to signal thread termination
+    pub thread_handle: Arc<Mutex<Option<std::thread::JoinHandle<()>>>>, // Handle to manage the thread
+}
+
+impl MouseListenerState {
+    /// Creates a new instance of the shared state.
+    pub fn new() -> Self {
+        Self {
+            stop_flag: Arc::new(AtomicBool::new(false)),
+            thread_handle: Arc::new(Mutex::new(None)),
+        }
+    }
+}
+
+/// Starts the mouse listener in a separate thread.
+pub async fn start_mouse_listener<F>(state: MouseListenerState, emit: F)
 where
-    F: Fn(&str) + 'static,
+    F: Fn(&str) + Send + 'static,
 {
-    let mut last_event_time = Instant::now();
-    let debounce_duration = Duration::from_millis(50); // Adjust based on system behavior
-    let mut last_event_type: Option<EventType> = None;
+    let stop_flag = Arc::clone(&state.stop_flag);
 
-    if let Err(error) = listen(move |event| {
-        let now = Instant::now();
-        let elapsed_time = now.duration_since(last_event_time);
+    // Check if a thread is already running
+    let mut handle_guard = state.thread_handle.lock().await;
+    if handle_guard.is_some() {
+        println!("Mouse listener is already running.");
+        return;
+    }
 
-        // Check if the event type is the same as the last one and if it's within the debounce duration
-        if elapsed_time > debounce_duration || Some(event.event_type.clone()) != last_event_type {
-            match event.event_type {
-                EventType::ButtonPress(button) => {
-                    println!("{:?}", event);
-                    emit(&format!("Mouse button pressed: {:?}", button));
-                }
-                EventType::ButtonRelease(button) => {
-                    println!("{:?}", event);
-                    emit(&format!("Mouse button released: {:?}", button));
-                }
-                _ => {}
+    // Reset the stop flag to allow restarting
+    stop_flag.store(false, Ordering::Relaxed);
+
+    println!("Mouse listener started.");
+    // Spawn the listener thread
+    let handle = thread::spawn(move || {
+        let debounce_duration = Duration::from_millis(50);
+        let mut last_event_time = Instant::now();
+        let mut last_event_type: Option<EventType> = None;
+
+        if let Err(error) = listen(move |event| {
+            if stop_flag.load(Ordering::Relaxed) {
+                return; // Exit if stop flag is set
             }
 
-            // Update the last event type and time
-            last_event_type = Some(event.event_type.clone());
-            last_event_time = now;
+            let now = Instant::now();
+            let elapsed_time = now.duration_since(last_event_time);
+
+            if elapsed_time > debounce_duration || Some(event.event_type.clone()) != last_event_type
+            {
+                match event.event_type {
+                    EventType::ButtonPress(button) => {
+                        emit(&format!("Mouse button pressed: {:?}", button));
+                    }
+                    EventType::ButtonRelease(button) => {
+                        emit(&format!("Mouse button released: {:?}", button));
+                    }
+                    _ => {}
+                }
+
+                last_event_type = Some(event.event_type.clone());
+                last_event_time = now;
+            }
+        }) {
+            eprintln!("Error: {:?}", error);
         }
-    }) {
-        eprintln!("Error: {:?}", error);
+    });
+
+    *handle_guard = Some(handle);
+}
+
+/// Stops the mouse listener by signaling the thread to terminate.
+pub async fn stop_mouse_listener(state: MouseListenerState) {
+    // Signal the thread to stop
+    state.stop_flag.store(true, Ordering::Relaxed);
+
+    // Wait for the thread to finish
+    let mut handle_guard = state.thread_handle.lock().await;
+    if let Some(handle) = handle_guard.take() {
+        if let Err(err) = handle.join() {
+            eprintln!("Error joining listener thread: {:?}", err);
+        }
+        println!("Mouse listener stopped.");
+    } else {
+        println!("No mouse listener is running.");
     }
 }
