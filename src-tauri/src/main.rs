@@ -3,7 +3,7 @@
 // src-tauri/src/main.rs
 
 use click4loop_tauri_lib::mouse_listener::{
-    start_mouse_listener, stop_mouse_listener, MouseListenerState,
+    start_mouse_listener, stop_mouse_listener, MouseEvent, MouseListenerState,
 };
 
 #[taurpc::procedures]
@@ -25,8 +25,13 @@ impl Api for ApiImpl {
     }
     async fn start_mouse_listener(self) {
         let mouse_state = self.mouse_state.clone();
-        start_mouse_listener(mouse_state, |event: &str| {
-            println!("Event received: {}", event);
+        start_mouse_listener(mouse_state, |event: MouseEvent| {
+            println!(
+                "Event received: {}, {} x, {}, y",
+                event.button.unwrap(),
+                event.x,
+                event.y
+            );
         })
         .await;
     }

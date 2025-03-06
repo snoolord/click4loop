@@ -23,11 +23,17 @@ impl MouseListenerState {
         }
     }
 }
+#[derive(Debug)]
+pub struct MouseEvent {
+    pub x: f64,
+    pub y: f64,
+    pub button: Option<String>,
+}
 
 /// Starts the mouse listener in a separate thread.
 pub async fn start_mouse_listener<F>(state: MouseListenerState, emit: F)
 where
-    F: Fn(&str) + Send + 'static,
+    F: Fn(MouseEvent) + Send + 'static,
 {
     let stop_flag = Arc::clone(&state.stop_flag);
 
@@ -47,6 +53,8 @@ where
         let debounce_duration = Duration::from_millis(50);
         let mut last_event_time = Instant::now();
         let mut last_event_type: Option<EventType> = None;
+        let mut x_coordinate: f64 = 0.0;
+        let mut y_coordinate: f64 = 0.0;
 
         if let Err(error) = listen(move |event| {
             if stop_flag.load(Ordering::Relaxed) {
@@ -59,11 +67,23 @@ where
             if elapsed_time > debounce_duration || Some(event.event_type.clone()) != last_event_type
             {
                 match event.event_type {
-                    EventType::ButtonPress(button) => {
-                        emit(&format!("Mouse button pressed: {:?}", button));
+                    EventType::ButtonPress(btn) => {
+                        emit(MouseEvent {
+                            x: x_coordinate,
+                            y: y_coordinate,
+                            button: Some(format!("{:?}", btn)),
+                        });
                     }
-                    EventType::ButtonRelease(button) => {
-                        emit(&format!("Mouse button released: {:?}", button));
+                    EventType::ButtonRelease(btn) => {
+                        emit(MouseEvent {
+                            x: x_coordinate,
+                            y: y_coordinate,
+                            button: Some(format!("{:?}", btn)),
+                        });
+                    }
+                    EventType::MouseMove { x: new_x, y: new_y } => {
+                        x_coordinate = new_x;
+                        y_coordinate = new_y;
                     }
                     _ => {}
                 }
