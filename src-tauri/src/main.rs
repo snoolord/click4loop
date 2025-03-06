@@ -2,9 +2,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 // src-tauri/src/main.rs
 
+use click4loop_tauri_lib::mouse_listener::run_mouse_listener;
+
 #[taurpc::procedures]
 trait Api {
     async fn greet(name: String) -> String;
+    async fn start_mouse_listener() -> ();
 }
 
 #[derive(Clone)]
@@ -14,6 +17,9 @@ struct ApiImpl;
 impl Api for ApiImpl {
     async fn greet(self, name: String) -> String {
         format!("Hello, {}!", name)
+    }
+    async fn start_mouse_listener(self) -> () {
+        run_mouse_listener(|event: &str| println!("Event received: {}", event));
     }
 }
 

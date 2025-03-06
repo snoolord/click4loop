@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import reactLogo from "./assets/react.svg";
 import "./App.css";
 import { rpc } from "./main";
@@ -14,6 +14,12 @@ function App() {
     setGreetMsg(greetMsg);
   }
 
+  useEffect(() => {
+    async function startMouseListener() {
+        await rpc.start_mouse_listener()
+    }
+    startMouseListener()
+  }, [])
   return (
     <main className="container">
       <h1>Welcome to Tauri + React</h1>

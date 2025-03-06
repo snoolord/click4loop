@@ -13,19 +13,14 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
+    "allowSyntheticDefaultImports": true,
 
     /* Linting */
     "strict": true,
     "noUnusedLocals": false,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
-
     /* Paths */
     "baseUrl": ".",
-    "paths": {
-      "@rspc/client/next": ["node_modules/@rspc/client/next"],
-      "@rspc/tauri/next": ["node_modules/@rspc/tauri/next"]
-    }
   },
   "include": ["src"],
   "references": [{ "path": "./tsconfig.node.json" }]
