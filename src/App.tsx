@@ -1,13 +1,19 @@
 import { useEffect, useState } from "react";
 import reactLogo from "./assets/react.svg";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+
 import "./App.css";
 import { rpc } from "./main";
+import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
+import { Button } from "@/components/ui/button";
 
 function App() {
 	const [greetMsg, setGreetMsg] = useState("");
 	const [name, setName] = useState("");
 
 	const [isRecording, setIsRecording] = useState(false);
+
+	const [isPlayingBack, setIsPlayingBack] = useState(false);
 
 	async function greet() {
 		// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -30,6 +36,23 @@ function App() {
 		}
 		startRecording();
 	};
+
+	const startPlayback = async () => {
+		setIsPlayingBack(true);
+		const appWindow = getCurrentWindow();
+		appWindow.hide();
+		await register("Space", async () => {
+			console.log("Shortcut triggered");
+			alert("unregistering and stopping playback");
+			unregister("Space");
+			await rpc.stop_playback();
+			setIsPlayingBack(false);
+		});
+		await rpc.start_playback(false);
+
+		setIsPlayingBack(false);
+	};
+
 	return (
 		<main className="container">
 			<h1>Welcome to Tauri + React</h1>
@@ -51,10 +74,13 @@ function App() {
 				<button type="submit">Greet</button>
 			</form>
 
-			<button type="button" onClick={handleStartStopRecording}>
+			<Button type="button" onClick={handleStartStopRecording}>
 				{isRecording ? "Stop Recording" : "Start Recording"}
-			</button>
+			</Button>
 			<p>{greetMsg}</p>
+			<Button type="button" onClick={startPlayback} disabled={isPlayingBack}>
+				{isPlayingBack ? "Playing back right now" : "Start Playback"}
+			</Button>
 		</main>
 	);
 }

@@ -1,4 +1,5 @@
-use rdev::{listen, EventType};
+use rdev::{listen, simulate, Button, EventType, SimulateError};
+use std::collections::VecDeque;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -6,12 +7,24 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
+use tokio::time::sleep;
+
+/// Struct to hold mouse event data.
+#[derive(Debug, Clone)]
+pub struct MouseEvent {
+    pub x: f64,
+    pub y: f64,
+    pub button: Option<Button>,
+}
 
 /// Shared state for managing the mouse listener thread.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MouseListenerState {
     pub stop_flag: Arc<AtomicBool>, // Flag to signal thread termination
+    pub playback_flag: Arc<AtomicBool>, // Flag to control playback loop
     pub thread_handle: Arc<Mutex<Option<std::thread::JoinHandle<()>>>>, // Handle to manage the thread
+    pub playback_thread_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>, // Handle to manage the playback thread
+    pub event_queue: Arc<Mutex<VecDeque<MouseEvent>>>, // Queue to store mouse events
 }
 
 impl MouseListenerState {
@@ -19,15 +32,12 @@ impl MouseListenerState {
     pub fn new() -> Self {
         Self {
             stop_flag: Arc::new(AtomicBool::new(false)),
+            playback_flag: Arc::new(AtomicBool::new(false)),
             thread_handle: Arc::new(Mutex::new(None)),
+            playback_thread_handle: Arc::new(Mutex::new(None)),
+            event_queue: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
-}
-#[derive(Debug)]
-pub struct MouseEvent {
-    pub x: f64,
-    pub y: f64,
-    pub button: Option<String>,
 }
 
 /// Starts the mouse listener in a separate thread.
@@ -36,12 +46,19 @@ where
     F: Fn(MouseEvent) + Send + 'static,
 {
     let stop_flag = Arc::clone(&state.stop_flag);
+    let event_queue = Arc::clone(&state.event_queue);
 
     // Check if a thread is already running
     let mut handle_guard = state.thread_handle.lock().await;
     if handle_guard.is_some() {
         println!("Mouse listener is already running.");
         return;
+    }
+
+    // Clear the event queue
+    {
+        let mut queue = event_queue.lock().await;
+        queue.clear();
     }
 
     // Reset the stop flag to allow restarting
@@ -68,22 +85,35 @@ where
             {
                 match event.event_type {
                     EventType::ButtonPress(btn) => {
-                        emit(MouseEvent {
+                        let mouse_event = MouseEvent {
                             x: x_coordinate,
                             y: y_coordinate,
-                            button: Some(format!("{:?}", btn)),
-                        });
+                            button: Some(btn),
+                        };
+                        emit(mouse_event.clone());
+                        if let Ok(mut queue) = event_queue.try_lock() {
+                            queue.push_back(mouse_event);
+                        }
                     }
                     EventType::ButtonRelease(btn) => {
-                        emit(MouseEvent {
+                        let mouse_event = MouseEvent {
                             x: x_coordinate,
                             y: y_coordinate,
-                            button: Some(format!("{:?}", btn)),
-                        });
+                            button: Some(btn),
+                        };
+                        emit(mouse_event.clone());
+                        if let Ok(mut queue) = event_queue.try_lock() {
+                            queue.push_back(mouse_event);
+                        }
                     }
                     EventType::MouseMove { x: new_x, y: new_y } => {
                         x_coordinate = new_x;
                         y_coordinate = new_y;
+                        // emit(MouseEvent {
+                        //     x: x_coordinate,
+                        //     y: y_coordinate,
+                        //     button: button.clone(),
+                        // });
                     }
                     _ => {}
                 }
@@ -113,5 +143,85 @@ pub async fn stop_mouse_listener(state: MouseListenerState) {
         println!("Mouse listener stopped.");
     } else {
         println!("No mouse listener is running.");
+    }
+}
+
+/// Plays back the recorded mouse events.
+pub async fn playback_events(state: MouseListenerState) -> Result<(), SimulateError> {
+    let event_queue = Arc::clone(&state.event_queue);
+    let queue = event_queue.lock().await;
+    println!("Playing back events: {:?}", state.event_queue);
+
+    let mut prev_event: Option<&MouseEvent> = None;
+
+    for event in queue.iter() {
+        if let Some(prev) = prev_event {
+            let steps = 10;
+            let dx = (event.x - prev.x) / steps as f64;
+            let dy = (event.y - prev.y) / steps as f64;
+
+            for i in 1..=steps {
+                simulate(&EventType::MouseMove {
+                    x: prev.x + dx * i as f64,
+                    y: prev.y + dy * i as f64,
+                })?;
+                sleep(Duration::from_millis(10)).await;
+            }
+        } else {
+            simulate(&EventType::MouseMove {
+                x: event.x,
+                y: event.y,
+            })?;
+        }
+
+        match event.button {
+            Some(Button::Left) => {
+                simulate(&EventType::ButtonPress(Button::Left))?;
+                sleep(Duration::from_millis(75)).await;
+            }
+            Some(Button::Right) => {
+                simulate(&EventType::ButtonPress(Button::Right))?;
+                sleep(Duration::from_millis(75)).await;
+            }
+            Some(Button::Middle) => {
+                simulate(&EventType::ButtonPress(Button::Middle))?;
+                sleep(Duration::from_millis(75)).await;
+            }
+            _ => {}
+        }
+
+        prev_event = Some(event);
+    }
+    Ok(())
+}
+
+pub async fn start_playback_loop(state: MouseListenerState) {
+    let playback_flag = Arc::clone(&state.playback_flag);
+    playback_flag.store(true, Ordering::Relaxed);
+
+    let state_clone = state.clone();
+    let handle = tokio::spawn(async move {
+        println!("Starting playback...");
+        while playback_flag.load(Ordering::Relaxed) {
+            if let Err(e) = playback_events(state_clone.clone()).await {
+                eprintln!("Error during playback_events: {:?}", e);
+            }
+        }
+    });
+
+    let mut handle_guard = state.playback_thread_handle.lock().await;
+    *handle_guard = Some(handle);
+}
+
+pub async fn stop_playback_loop(state: MouseListenerState) {
+    let playback_flag = Arc::clone(&state.playback_flag);
+    playback_flag.store(false, Ordering::Relaxed);
+
+    let mut handle_guard = state.playback_thread_handle.lock().await;
+    if let Some(handle) = handle_guard.take() {
+        handle.abort();
+        println!("Playback stopped.");
+    } else {
+        println!("No playback is running.");
     }
 }
