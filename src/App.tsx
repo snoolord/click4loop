@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import reactLogo from "./assets/react.svg";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import "./App.css";
@@ -10,6 +9,7 @@ import { Button } from "@/components/ui/button";
 function App() {
 	const [greetMsg, setGreetMsg] = useState("");
 	const [name, setName] = useState("");
+	const [shouldLoop, setShouldLoop] = useState(false);
 
 	const [isRecording, setIsRecording] = useState(false);
 
@@ -23,6 +23,13 @@ function App() {
 
 	const startRecording = async () => {
 		await rpc.start_mouse_listener();
+
+		await register("Space", async () => {
+			console.log("Shortcut triggered");
+			alert("unregistering and stopping recording");
+			unregister("Space");
+			stopRecording();
+		});
 		setIsRecording(true);
 	};
 	const stopRecording = async () => {
@@ -48,39 +55,29 @@ function App() {
 			await rpc.stop_playback();
 			setIsPlayingBack(false);
 		});
-		await rpc.start_playback(false);
+		await rpc.start_playback(shouldLoop);
 
 		setIsPlayingBack(false);
 	};
 
 	return (
-		<main className="container">
-			<h1>Welcome to Tauri + React</h1>
-
-			<p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-			<form
-				className="row"
-				onSubmit={(e) => {
-					e.preventDefault();
-					greet();
-				}}
-			>
-				<input
-					id="greet-input"
-					onChange={(e) => setName(e.currentTarget.value)}
-					placeholder="Enter a name..."
-				/>
-				<button type="submit">Greet</button>
-			</form>
-
+		<main className="h-full flex flex-col gap-2 items-center justify-center">
 			<Button type="button" onClick={handleStartStopRecording}>
 				{isRecording ? "Stop Recording" : "Start Recording"}
 			</Button>
+
 			<p>{greetMsg}</p>
 			<Button type="button" onClick={startPlayback} disabled={isPlayingBack}>
 				{isPlayingBack ? "Playing back right now" : "Start Playback"}
 			</Button>
+			<div className="flex items-center gap-1 justify-center">
+				<input
+					type="checkbox"
+					onChange={() => setShouldLoop(!shouldLoop)}
+					checked={shouldLoop}
+				/>
+				<label htmlFor="loopCheckbox">Loop playback</label>
+			</div>
 		</main>
 	);
 }

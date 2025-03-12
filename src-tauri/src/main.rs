@@ -80,7 +80,7 @@ async fn main() {
         .setup(|app| {
             let win_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title("click4loop")
-                .inner_size(200, 200);
+                .inner_size(200.0, 150.0);
 
             // set transparent title bar only when building for macOS
             #[cfg(target_os = "macos")]
