@@ -25,6 +25,7 @@ pub struct MouseListenerState {
     pub thread_handle: Arc<Mutex<Option<std::thread::JoinHandle<()>>>>, // Handle to manage the thread
     pub playback_thread_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>, // Handle to manage the playback thread
     pub event_queue: Arc<Mutex<VecDeque<MouseEvent>>>, // Queue to store mouse events
+    pub last_event_played: Arc<Mutex<Option<MouseEvent>>>, // Last event played during playback
 }
 
 impl MouseListenerState {
@@ -36,7 +37,12 @@ impl MouseListenerState {
             thread_handle: Arc::new(Mutex::new(None)),
             playback_thread_handle: Arc::new(Mutex::new(None)),
             event_queue: Arc::new(Mutex::new(VecDeque::new())),
+            last_event_played: Arc::new(Mutex::new(None)), // Initialize with None
         }
+    }
+    pub async fn reset_last_event_played(&self) {
+        let mut last_event = self.last_event_played.lock().await;
+        *last_event = None;
     }
 }
 
@@ -109,11 +115,6 @@ where
                     EventType::MouseMove { x: new_x, y: new_y } => {
                         x_coordinate = new_x;
                         y_coordinate = new_y;
-                        // emit(MouseEvent {
-                        //     x: x_coordinate,
-                        //     y: y_coordinate,
-                        //     button: button.clone(),
-                        // });
                     }
                     _ => {}
                 }
@@ -149,10 +150,20 @@ pub async fn stop_mouse_listener(state: MouseListenerState) {
 /// Plays back the recorded mouse events.
 pub async fn playback_events(state: MouseListenerState) -> Result<(), SimulateError> {
     let event_queue = Arc::clone(&state.event_queue);
-    let queue = event_queue.lock().await;
-    println!("Playing back events: {:?}", state.event_queue);
+    let last_event_played = Arc::clone(&state.last_event_played);
 
-    let mut prev_event: Option<&MouseEvent> = None;
+    let queue = event_queue.lock().await;
+
+    if queue.is_empty() {
+        println!("Event queue is empty. Nothing to playback.");
+        return Ok(());
+    }
+
+    // Get the last event played
+    let mut prev_event = {
+        let last_event = last_event_played.lock().await;
+        last_event.clone()
+    };
 
     for event in queue.iter() {
         if let Some(prev) = prev_event {
@@ -165,6 +176,7 @@ pub async fn playback_events(state: MouseListenerState) -> Result<(), SimulateEr
                     x: prev.x + dx * i as f64,
                     y: prev.y + dy * i as f64,
                 })?;
+
                 sleep(Duration::from_millis(10)).await;
             }
         } else {
@@ -177,21 +189,30 @@ pub async fn playback_events(state: MouseListenerState) -> Result<(), SimulateEr
         match event.button {
             Some(Button::Left) => {
                 simulate(&EventType::ButtonPress(Button::Left))?;
-                sleep(Duration::from_millis(75)).await;
+                sleep(Duration::from_millis(50)).await;
+                simulate(&EventType::ButtonRelease(Button::Left))?;
             }
             Some(Button::Right) => {
                 simulate(&EventType::ButtonPress(Button::Right))?;
-                sleep(Duration::from_millis(75)).await;
+                sleep(Duration::from_millis(50)).await;
+                simulate(&EventType::ButtonRelease(Button::Right))?;
             }
             Some(Button::Middle) => {
                 simulate(&EventType::ButtonPress(Button::Middle))?;
-                sleep(Duration::from_millis(75)).await;
+                sleep(Duration::from_millis(50)).await;
+                simulate(&EventType::ButtonRelease(Button::Middle))?;
             }
             _ => {}
         }
+        // Update the last event played
+        {
+            let mut last_event = last_event_played.lock().await;
+            *last_event = Some(event.clone());
+        }
 
-        prev_event = Some(event);
+        prev_event = Some(event.clone());
     }
+
     Ok(())
 }
 

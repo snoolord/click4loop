@@ -16,6 +16,7 @@ trait Api {
     async fn playback_events();
     async fn start_playback(loop_playback: bool);
     async fn stop_playback();
+    async fn clear_playback_queue();
 }
 
 #[derive(Clone)]
@@ -54,6 +55,8 @@ impl Api for ApiImpl {
     }
     async fn start_playback(self, loop_playback: bool) {
         let mouse_state = self.mouse_state.clone();
+        mouse_state.reset_last_event_played().await;
+
         if loop_playback {
             start_playback_loop(mouse_state).await;
         } else {
@@ -67,6 +70,14 @@ impl Api for ApiImpl {
         let mouse_state = self.mouse_state.clone();
         stop_playback_loop(mouse_state).await;
     }
+
+    async fn clear_playback_queue(self) {
+        let mouse_state = self.mouse_state.clone();
+        let mut event_queue = mouse_state.event_queue.lock().await;
+
+        event_queue.clear();
+        println!("Playback queue cleared.");
+    }
 }
 
 #[tokio::main]
@@ -77,6 +88,8 @@ async fn main() {
     .into_handler(); // This generates a TauRPC handler type.
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let win_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title("click4loop")

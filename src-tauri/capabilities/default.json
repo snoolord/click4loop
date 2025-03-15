@@ -10,7 +10,15 @@
     "global-shortcut:allow-register",
     "global-shortcut:allow-unregister",
     "core:window:default",
-    "core:window:allow-start-dragging"
+    "core:window:allow-start-dragging",
+    "notification:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:app:allow-app-hide",
+    "core:app:allow-app-show",
+    "dialog:allow-open",
+    "dialog:allow-confirm",
+    "dialog:default"
   ]
-
 }
