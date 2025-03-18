@@ -1,4 +1,4 @@
-use rdev::{listen, simulate, Button, EventType, SimulateError};
+use rdev::{simulate, Button, EventType, SimulateError};
 use std::collections::VecDeque;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -72,57 +72,81 @@ where
 
     println!("Mouse listener started.");
     // Spawn the listener thread
+    let coordinates = Arc::new(Mutex::new((0.0f64, 0.0f64)));
+    let last_event_data = Arc::new(Mutex::new((Instant::now(), None::<EventType>)));
+
+    let coordinates_clone = Arc::clone(&coordinates);
+    let last_event_data_clone = Arc::clone(&last_event_data);
+
     let handle = thread::spawn(move || {
         let debounce_duration = Duration::from_millis(50);
-        let mut last_event_time = Instant::now();
-        let mut last_event_type: Option<EventType> = None;
-        let mut x_coordinate: f64 = 0.0;
-        let mut y_coordinate: f64 = 0.0;
 
-        if let Err(error) = listen(move |event| {
+        #[cfg(target_os = "macos")]
+        rdev::set_is_main_thread(false);
+        #[cfg(target_os = "windows")]
+        rdev::set_event_popup(false);
+
+        let func = move |event: rdev::Event| -> Option<rdev::Event> {
             if stop_flag.load(Ordering::Relaxed) {
-                return; // Exit if stop flag is set
+                return None;
             }
 
             let now = Instant::now();
-            let elapsed_time = now.duration_since(last_event_time);
+            let should_process = {
+                if let Ok(mut last_data) = last_event_data_clone.try_lock() {
+                    let elapsed_time = now.duration_since(last_data.0);
+                    let should_proc = elapsed_time > debounce_duration
+                        || Some(event.event_type.clone()) != last_data.1;
+                    if should_proc {
+                        last_data.0 = now;
+                        last_data.1 = Some(event.event_type.clone());
+                    }
+                    should_proc
+                } else {
+                    false
+                }
+            };
 
-            if elapsed_time > debounce_duration || Some(event.event_type.clone()) != last_event_type
-            {
+            if should_process {
                 match event.event_type {
                     EventType::ButtonPress(btn) => {
-                        let mouse_event = MouseEvent {
-                            x: x_coordinate,
-                            y: y_coordinate,
-                            button: Some(btn),
-                        };
-                        emit(mouse_event.clone());
-                        if let Ok(mut queue) = event_queue.try_lock() {
-                            queue.push_back(mouse_event);
+                        if let Ok(coords) = coordinates_clone.try_lock() {
+                            let mouse_event = MouseEvent {
+                                x: coords.0,
+                                y: coords.1,
+                                button: Some(btn),
+                            };
+                            emit(mouse_event.clone());
+                            if let Ok(mut queue) = event_queue.try_lock() {
+                                queue.push_back(mouse_event);
+                            }
                         }
                     }
                     EventType::ButtonRelease(btn) => {
-                        let mouse_event = MouseEvent {
-                            x: x_coordinate,
-                            y: y_coordinate,
-                            button: Some(btn),
-                        };
-                        emit(mouse_event.clone());
-                        if let Ok(mut queue) = event_queue.try_lock() {
-                            queue.push_back(mouse_event);
+                        if let Ok(coords) = coordinates_clone.try_lock() {
+                            let mouse_event = MouseEvent {
+                                x: coords.0,
+                                y: coords.1,
+                                button: Some(btn),
+                            };
+                            emit(mouse_event.clone());
+                            if let Ok(mut queue) = event_queue.try_lock() {
+                                queue.push_back(mouse_event);
+                            }
                         }
                     }
                     EventType::MouseMove { x: new_x, y: new_y } => {
-                        x_coordinate = new_x;
-                        y_coordinate = new_y;
+                        if let Ok(mut coords) = coordinates_clone.try_lock() {
+                            *coords = (new_x, new_y);
+                        }
                     }
                     _ => {}
                 }
-
-                last_event_type = Some(event.event_type.clone());
-                last_event_time = now;
             }
-        }) {
+            Some(event)
+        };
+
+        if let Err(error) = rdev::grab(func) {
             eprintln!("Error: {:?}", error);
         }
     });
@@ -136,14 +160,21 @@ pub async fn stop_mouse_listener(state: MouseListenerState) {
     state.stop_flag.store(true, Ordering::Relaxed);
 
     // Wait for the thread to finish
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    {
+        if let Err(e) = rdev::exit_grab() {
+            eprintln!("Error during exit_grab: {:?}", e);
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        rdev::exit_grab_listen();
+    }
     let mut handle_guard = state.thread_handle.lock().await;
     if let Some(handle) = handle_guard.take() {
         if let Err(err) = handle.join() {
             eprintln!("Error joining listener thread: {:?}", err);
         }
-        println!("Mouse listener stopped.");
-    } else {
-        println!("No mouse listener is running.");
     }
 }
 

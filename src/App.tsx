@@ -71,7 +71,7 @@ function App() {
 		}
 		hide();
 		await register("Space", async () => {
-			unregister("Space");
+			await unregister("Space");
 			stopRecording();
 			if (isPermissionGranted) {
 				sendNotification({
@@ -129,7 +129,7 @@ function App() {
 			const formattedTime = `${hours}h ${minutes}m ${seconds}s`;
 
 			alert(`Playback stopped. Clicked for: ${formattedTime}`);
-			unregister("Space");
+			await unregister("Space");
 
 			if (isPermissionGranted) {
 				sendNotification({
