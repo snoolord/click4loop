@@ -22,6 +22,7 @@
     "dialog:default",
     "notification:allow-check-permissions",
     "macos-permissions:default",
-    "log:allow-log"
+    "log:allow-log",
+    "global-shortcut:allow-unregister-all"
   ]
 }

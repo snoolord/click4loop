@@ -6,17 +6,20 @@ use click4loop_tauri_lib::mouse_listener::{
     playback_events, start_mouse_listener, start_playback_loop, stop_mouse_listener,
     stop_playback_loop, MouseEvent, MouseListenerState,
 };
-use tauri::{TitleBarStyle, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, Runtime, TitleBarStyle, WebviewUrl, WebviewWindowBuilder};
 
-#[taurpc::procedures]
+#[taurpc::procedures(event_trigger = ApiEventTrigger)]
+
 trait Api {
     async fn greet(name: String) -> String;
     async fn start_mouse_listener();
     async fn stop_mouse_listener();
     async fn playback_events();
-    async fn start_playback(loop_playback: bool);
+    async fn start_playback(app_handle: AppHandle<impl Runtime>, loop_playback: bool);
     async fn stop_playback();
     async fn clear_playback_queue();
+    #[taurpc(event)]
+    async fn playback_ended();
 }
 
 #[derive(Clone)]
@@ -53,7 +56,7 @@ impl Api for ApiImpl {
             eprintln!("Error during playback_events: {:?}", e);
         }
     }
-    async fn start_playback(self, loop_playback: bool) {
+    async fn start_playback(self, app_handle: AppHandle<impl Runtime>, loop_playback: bool) {
         let mouse_state = self.mouse_state.clone();
         mouse_state.reset_last_event_played().await;
 
@@ -62,6 +65,26 @@ impl Api for ApiImpl {
         } else {
             if let Err(e) = playback_events(mouse_state).await {
                 eprintln!("Error during playback_events: {:?}", e);
+            }
+
+            if let Some(window) = app_handle.get_webview_window("main") {
+                // Show the window if it is hidden
+                if let Err(e) = window.show() {
+                    eprintln!("Failed to show the window: {:?}", e);
+                }
+
+                // Bring the window to focus
+                if let Err(e) = window.set_focus() {
+                    eprintln!("Failed to focus the window: {:?}", e);
+                }
+            } else {
+                eprintln!("Window not found");
+            }
+
+            let trigger = ApiEventTrigger::new(app_handle);
+
+            if let Err(e) = trigger.playback_ended() {
+                eprintln!("Error triggering playback_ended: {:?}", e);
             }
         }
     }

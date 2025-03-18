@@ -3,7 +3,11 @@ import { getAllWindows, getCurrentWindow } from "@tauri-apps/api/window";
 
 import "./App.css";
 import { rpc } from "./main";
-import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
+import {
+	register,
+	unregister,
+	unregisterAll,
+} from "@tauri-apps/plugin-global-shortcut";
 import {
 	isPermissionGranted,
 	requestPermission,
@@ -19,6 +23,7 @@ import {
 	requestAccessibilityPermission,
 } from "tauri-plugin-macos-permissions-api";
 import { attachConsole } from "@tauri-apps/plugin-log";
+import { UnlistenFn } from "@tauri-apps/api/event";
 
 function App() {
 	const [greetMsg, setGreetMsg] = useState("");
@@ -71,7 +76,6 @@ function App() {
 		}
 		hide();
 		await register("Space", async () => {
-			await unregister("Space");
 			stopRecording();
 			if (isPermissionGranted) {
 				sendNotification({
@@ -80,6 +84,7 @@ function App() {
 				});
 			}
 			show();
+			await unregisterAll();
 		});
 		setIsRecordingSaved(true);
 	};
@@ -107,6 +112,7 @@ function App() {
 		const startTime = Date.now();
 
 		const isPermissionGranted = await getNotificationPermissions();
+		let unlisten: UnlistenFn | null = null;
 
 		// Once permission has been granted we can send the notification
 		if (isPermissionGranted) {
@@ -116,9 +122,10 @@ function App() {
 			});
 		}
 		hide();
-		await register("Space", async () => {
-			console.log("Shortcut triggered");
-
+		const handleStopPlayback = async (
+			startTime: number,
+			isPermissionGranted: boolean,
+		) => {
 			const endTime = Date.now();
 			const elapsedTime = endTime - startTime; // in milliseconds
 			const seconds = Math.floor((elapsedTime / 1000) % 60);
@@ -128,22 +135,37 @@ function App() {
 			// Format elapsed time
 			const formattedTime = `${hours}h ${minutes}m ${seconds}s`;
 
-			alert(`Playback stopped. Clicked for: ${formattedTime}`);
-			await unregister("Space");
+			setIsPlayingBack(false);
 
+			await show();
+			alert(`Playback stopped. Clicked for: ${formattedTime}`);
 			if (isPermissionGranted) {
 				sendNotification({
 					title: "Playback stopped",
 					body: "Press Start Playback to Start Playback or Discard Recording to record a new recording",
 				});
 			}
-			await rpc.stop_playback();
-			setIsPlayingBack(false);
-			show();
-		});
-		await rpc.start_playback(shouldLoop);
+			if (unlisten) {
+				unlisten();
+				unlisten = null;
+			}
+		};
+		if (shouldLoop) {
+			await register("Space", async () => {
+				console.log("Shortcut triggered");
 
-		setIsPlayingBack(false);
+				await rpc.stop_playback();
+				handleStopPlayback(startTime, isPermissionGranted);
+				await unregisterAll();
+			});
+		} else {
+			const s = async () => show();
+			unlisten = await rpc.playback_ended.on(async () => {
+				console.log("Playback ended");
+				handleStopPlayback(startTime, isPermissionGranted);
+			});
+		}
+		await rpc.start_playback(shouldLoop);
 	};
 
 	return (
