@@ -11,9 +11,14 @@ import {
 } from "@tauri-apps/plugin-notification";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { confirm } from "@tauri-apps/plugin-dialog";
+import { confirm, message } from "@tauri-apps/plugin-dialog";
 import { hide, show } from "@tauri-apps/api/app";
 import { getNotificationPermissions } from "@/lib/tauri-utils";
+import {
+	checkAccessibilityPermission,
+	requestAccessibilityPermission,
+} from "tauri-plugin-macos-permissions-api";
+import { attachConsole } from "@tauri-apps/plugin-log";
 
 function App() {
 	const [greetMsg, setGreetMsg] = useState("");
@@ -23,6 +28,12 @@ function App() {
 	const [isRecordingSaved, setIsRecordingSaved] = useState(false);
 
 	const [isPlayingBack, setIsPlayingBack] = useState(false);
+	useEffect(() => {
+		async function mount() {
+			const detach = await attachConsole();
+		}
+		mount();
+	}, []);
 
 	async function greet() {
 		// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -31,8 +42,24 @@ function App() {
 	}
 
 	const startRecording = async () => {
-		await rpc.start_mouse_listener();
+		let accessibilityGranted = await checkAccessibilityPermission();
 
+		if (!accessibilityGranted) {
+			await requestAccessibilityPermission();
+			accessibilityGranted = await checkAccessibilityPermission();
+		}
+
+		if (!accessibilityGranted) {
+			await message(
+				"click4loop cannot work without accessibility permissions",
+				{
+					title: "Click Start Recording again to re-request permissions",
+					kind: "error",
+				},
+			);
+			return;
+		}
+		await rpc.start_mouse_listener();
 		const isPermissionGranted = await getNotificationPermissions();
 
 		// Once permission has been granted we can send the notification

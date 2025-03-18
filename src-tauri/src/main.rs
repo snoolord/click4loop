@@ -88,12 +88,15 @@ async fn main() {
     .into_handler(); // This generates a TauRPC handler type.
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_log::Builder::new().build())
+        .plugin(tauri_plugin_macos_permissions::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let win_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title("click4loop")
-                .inner_size(200.0, 150.0);
+                .inner_size(200.0, 150.0)
+                .devtools(true);
 
             // set transparent title bar only when building for macOS
             #[cfg(target_os = "macos")]
@@ -123,6 +126,13 @@ async fn main() {
             Ok(())
         })
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::Webview,
+                ))
+                .build(),
+        )
         .invoke_handler(taurpc::create_ipc_handler(api_handler))
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -19,6 +19,9 @@
     "core:app:allow-app-show",
     "dialog:allow-open",
     "dialog:allow-confirm",
-    "dialog:default"
+    "dialog:default",
+    "notification:allow-check-permissions",
+    "macos-permissions:default",
+    "log:allow-log"
   ]
 }
